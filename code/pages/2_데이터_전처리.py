@@ -1,112 +1,68 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 
-st.set_page_config(
-    page_title="데이터 전처리",
-    page_icon="🧹",
-    layout="wide"
-)
-
-DATA_URL = (
-    "https://raw.githubusercontent.com/"
-    "gosokturn/Analyzing-personal-Data-project/"
-    "refs/heads/main/data/indexData.csv"
+from market_utils import (
+    load_raw_data,
+    prepare_market_data,
+    build_market_features
 )
 
 
-@st.cache_data
-def load_data(url):
-    return pd.read_csv(url, encoding="utf-8")
-
-
-st.title("🧹 데이터 전처리 실습실")
+st.title("🧹 세계 금융시장 데이터 전처리")
 st.caption(
-    "원본 데이터의 문제를 확인하고, "
-    "전처리 방법을 선택해 결과를 비교합니다."
+    "국가별·시장별 지수를 공정하게 비교하기 위한 전처리 과정"
 )
+
+
+# ==========================================
+# 1. 원본 데이터
+# ==========================================
 
 try:
-    raw_df = load_data(DATA_URL)
+    raw_df = load_raw_data()
+
 except Exception as e:
-    st.error("GitHub에서 CSV 데이터를 불러오지 못했습니다.")
-    st.write("데이터 주소와 저장소의 공개 설정을 확인해 주세요.")
+    st.error("원본 데이터를 불러오지 못했습니다.")
     st.exception(e)
     st.stop()
 
 
-# ----------------------------------------
-# 1. 원본 데이터 준비
-# ----------------------------------------
+st.header("1. 원본 데이터 확인")
 
-before_df = raw_df.copy()
+c1, c2, c3 = st.columns(3)
 
-if "Date" in before_df.columns:
-    before_df["Date"] = pd.to_datetime(
-        before_df["Date"],
-        errors="coerce"
-    )
-
-for col in ["Open", "High", "Low", "Close", "Adj Close", "Volume"]:
-    if col in before_df.columns:
-        before_df[col] = pd.to_numeric(
-            before_df[col],
-            errors="coerce"
-        )
-
-numeric_cols = before_df.select_dtypes(
-    include=np.number
-).columns.tolist()
-
-outlier_candidates = [
-    col for col in numeric_cols
-    if col.lower() not in ["id", "index"]
-]
-
-
-# ----------------------------------------
-# 2. 원본 데이터 상태
-# ----------------------------------------
-
-st.header("1. 원본 데이터 상태")
-
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("행 개수", f"{len(before_df):,}")
-col2.metric("열 개수", f"{len(before_df.columns):,}")
-col3.metric(
-    "결측 셀 개수",
-    f"{int(before_df.isna().sum().sum()):,}"
-)
-col4.metric(
-    "완전 중복 행",
-    f"{int(before_df.duplicated().sum()):,}"
+c1.metric("원본 행 개수", f"{len(raw_df):,}")
+c2.metric("열 개수", f"{len(raw_df.columns):,}")
+c3.metric(
+    "전체 결측 셀",
+    f"{int(raw_df.isna().sum().sum()):,}"
 )
 
 with st.expander("원본 데이터 미리 보기"):
     st.dataframe(
-        before_df.head(20),
+        raw_df.head(30),
         use_container_width=True
     )
 
 missing_table = pd.DataFrame({
-    "열 이름": before_df.columns,
-    "결측치 개수": [
-        int(before_df[col].isna().sum())
-        for col in before_df.columns
+    "열": raw_df.columns,
+    "결측 개수": [
+        int(raw_df[col].isna().sum())
+        for col in raw_df.columns
     ],
     "결측 비율(%)": [
-        round(before_df[col].isna().mean() * 100, 2)
-        for col in before_df.columns
+        round(raw_df[col].isna().mean() * 100, 2)
+        for col in raw_df.columns
     ]
 })
 
-st.subheader("열별 결측치")
+st.subheader("열별 결측치 현황")
 
 st.dataframe(
     missing_table.sort_values(
-        "결측치 개수",
+        "결측 비율(%)",
         ascending=False
     ),
     use_container_width=True,
@@ -114,632 +70,299 @@ st.dataframe(
 )
 
 
-# ----------------------------------------
-# 3. 결측치와 이상치 확인
-# ----------------------------------------
+# ==========================================
+# 2. 전처리 방법 설명
+# ==========================================
 
-st.header("2. 결측치와 이상치 확인")
+st.divider()
+st.header("2. 전처리 방법과 선택 이유")
 
 st.markdown("""
-**결측치**는 값이 비어 있거나 기록되지 않은 경우이다.
+### ① 날짜 및 데이터 유형 변환
 
-**이상치**는 값이 존재하지만 다른 관측값과 비교했을 때
-유난히 크거나 작은 경우이다.
+날짜는 날짜형으로, 주가와 거래량은 숫자형으로 변환한다.
 
-결측치는 값이 없는 문제이고, 이상치는 값의 분포와 타당성을
-확인해야 하는 문제라는 차이가 있다.
+**이유:** 날짜가 문자로 저장되어 있으면 시간 순서에 따른 수익률 계산이
+잘못될 수 있다. 숫자형 변환은 통계 계산을 가능하게 한다.
+
+### ② 결측 가격 처리
+
+지수 이름, 날짜, 종가가 없는 행은 분석에서 제외한다.
+
+**이유:** 주가가 없는 날짜의 가격을 중앙값으로 채우면 실제로 관측되지
+않은 가격이 만들어진다. 이렇게 만들어진 가격은 가짜 수익률을 발생시킬 수 있다.
+
+### ③ 중복 기록 제거
+
+같은 지수와 같은 날짜에 기록된 행이 여러 개라면 마지막 기록만 남긴다.
+
+**이유:** 동일한 시장의 동일한 날짜가 여러 번 계산되면 특정 날짜의
+영향이 과도하게 반영될 수 있다.
+
+### ④ 수익률 변환
+
+종가 자체가 아닌 전일 대비 수익률을 계산한다.
+
+**이유:** 주가지수는 국가마다 숫자의 단위와 기준점이 다르다.
+따라서 가격 수준보다 수익률을 비교하는 것이 적절하다.
+
+### ⑤ 이상치 처리
+
+금융 데이터의 큰 변동은 실제 경제 사건일 수 있으므로 무조건 삭제하지 않는다.
+
+**이유:** 실제 급락 데이터를 삭제하면 시장 위험이 실제보다 작게 측정될 수 있다.
+
+### ⑥ 변수 표준화
+
+K-Means 군집화 전에 RobustScaler를 사용한다.
+
+**이유:** 변동성이나 수익률 등 변수마다 숫자의 크기가 다르다.
+큰 숫자를 가진 변수가 군집화 결과에 과도하게 영향을 주는 것을 줄인다.
 """)
 
 st.info(
-    "금융 데이터의 큰 가격 변동이나 거래량은 실제 시장 상황일 수 있습니다. "
-    "이상치 후보라고 해서 반드시 잘못된 데이터는 아닙니다."
+    "주의: 결측 가격을 중앙값으로 채우지 않는 것은 금융 시계열의 "
+    "실제 움직임을 보존하기 위한 선택이다. 모든 데이터에 같은 결측치 "
+    "처리 방법이 정답인 것은 아니다."
 )
 
-selected_outlier_col = None
 
-if outlier_candidates:
+# ==========================================
+# 3. 극단값 완화 선택
+# ==========================================
 
-    default_idx = (
-        outlier_candidates.index("Close")
-        if "Close" in outlier_candidates
-        else 0
-    )
-
-    selected_outlier_col = st.selectbox(
-        "이상치 후보를 확인할 숫자형 열",
-        options=outlier_candidates,
-        index=default_idx
-    )
-
-    values = before_df[selected_outlier_col].dropna()
-
-    if len(values) >= 4:
-
-        q1 = values.quantile(0.25)
-        q3 = values.quantile(0.75)
-        iqr = q3 - q1
-
-        lower = q1 - 1.5 * iqr
-        upper = q3 + 1.5 * iqr
-
-        outlier_mask = (
-            (before_df[selected_outlier_col] < lower)
-            | (before_df[selected_outlier_col] > upper)
-        ).fillna(False)
-
-        outlier_df = before_df.loc[outlier_mask].copy()
-
-        c1, c2, c3 = st.columns(3)
-
-        c1.metric(
-            "이상치 후보 개수",
-            f"{len(outlier_df):,}"
-        )
-
-        c2.metric(
-            "IQR 하한",
-            f"{lower:,.3f}"
-        )
-
-        c3.metric(
-            "IQR 상한",
-            f"{upper:,.3f}"
-        )
-
-        st.caption(
-            "IQR = 제3사분위수(Q3) - 제1사분위수(Q1). "
-            "Q1 - 1.5×IQR보다 작거나 Q3 + 1.5×IQR보다 큰 값을 "
-            "이상치 후보로 표시합니다."
-        )
-
-        fig_box = px.box(
-            before_df,
-            y=selected_outlier_col,
-            points="outliers",
-            title=f"{selected_outlier_col} 분포와 이상치 후보"
-        )
-
-        st.plotly_chart(
-            fig_box,
-            use_container_width=True
-        )
-
-        with st.expander("이상치 후보 데이터 확인"):
-
-            if outlier_df.empty:
-                st.write("이 기준에 해당하는 이상치 후보가 없습니다.")
-            else:
-                st.dataframe(
-                    outlier_df.head(100),
-                    use_container_width=True
-                )
-
-                st.caption(
-                    "최대 100개 행을 표시합니다."
-                )
-
-    else:
-        st.warning(
-            "유효한 숫자 데이터가 부족해 IQR 분석을 수행할 수 없습니다."
-        )
-
-else:
-    st.info("이상치 탐색에 사용할 숫자형 열이 없습니다.")
-
-
-# ----------------------------------------
-# 4. 데이터 편향 가능성 확인
-# ----------------------------------------
-
-st.header("3. 데이터 편향 가능성 점검")
+st.divider()
+st.header("3. 이상치 및 극단값 처리")
 
 st.markdown("""
-데이터 편향은 수집된 데이터가 전체 대상을 충분히 대표하지 못하거나,
-특정 대상 또는 기간에 관측값이 치우쳐 나타나는 문제이다.
+수익률이 다른 날짜보다 매우 크거나 작으면 이상치 후보로 볼 수 있다.
 
-지수별·연도별 데이터 개수를 비교하여 데이터가 특정 지수나 기간에
-집중되어 있는지 확인한다.
+그러나 금융시장에서는 경제 위기, 정책 변화, 국제 사건 등으로 인해
+실제로 큰 가격 변동이 발생할 수 있다.
+
+따라서 기본적으로 극단값을 유지한다.
 """)
 
-if "Index" in before_df.columns:
-
-    index_counts = (
-        before_df["Index"]
-        .value_counts(dropna=False)
-        .rename_axis("지수")
-        .reset_index(name="행 개수")
-    )
-
-    st.subheader("지수별 데이터 개수")
-
-    fig_index = px.bar(
-        index_counts,
-        x="지수",
-        y="행 개수",
-        title="지수별 관측 행 개수"
-    )
-
-    st.plotly_chart(
-        fig_index,
-        use_container_width=True
-    )
-
-    st.dataframe(
-        index_counts,
-        use_container_width=True,
-        hide_index=True
-    )
-
-if "Date" in before_df.columns:
-
-    dated = before_df.dropna(subset=["Date"]).copy()
-
-    if not dated.empty:
-
-        dated["연도"] = dated["Date"].dt.year
-
-        year_counts = (
-            dated["연도"]
-            .value_counts()
-            .sort_index()
-            .rename_axis("연도")
-            .reset_index(name="행 개수")
-        )
-
-        st.subheader("연도별 데이터 개수")
-
-        fig_year = px.bar(
-            year_counts,
-            x="연도",
-            y="행 개수",
-            title="연도별 관측 행 개수"
-        )
-
-        st.plotly_chart(
-            fig_year,
-            use_container_width=True
-        )
-
-st.caption(
-    "지수별·연도별 행 개수가 다르다는 사실만으로 편향이 확정되는 것은 아닙니다. "
-    "데이터 수집 기간과 분석 목적을 함께 고려해야 합니다."
+winsorize = st.checkbox(
+    "시장별 수익률의 1%, 99% 분위수 경계로 극단값 완화",
+    value=False,
+    key="winsorize_returns"
 )
 
-
-# ----------------------------------------
-# 5. 전처리 방법 선택
-# ----------------------------------------
-
-st.header("4. 전처리 방법 선택")
-
-st.subheader("① 결측치 처리")
-
-missing_method = st.radio(
-    "결측치를 어떻게 처리할까요?",
-    options=[
-        "그대로 유지",
-        "결측치가 있는 행 삭제",
-        "숫자형은 중앙값, 문자형은 최빈값으로 대체"
-    ],
-    index=0
-)
-
-st.caption(
-    "행 삭제는 데이터 손실을 유발할 수 있습니다. "
-    "대체 방법은 실제 관측값이 아닌 추정값을 넣는 방법입니다."
-)
-
-st.subheader("② 중복 데이터 처리")
-
-remove_duplicates = st.checkbox(
-    "완전히 동일한 중복 행 제거",
-    value=True
-)
-
-remove_same_date_duplicates = False
-
-if {"Index", "Date"}.issubset(before_df.columns):
-
-    remove_same_date_duplicates = st.checkbox(
-        "같은 지수와 날짜의 중복 기록 제거",
-        value=False,
-        help=(
-            "같은 지수와 날짜가 반복되는 행을 제거합니다. "
-            "중복 기록이 실제로 불필요한지 확인한 뒤 선택하세요."
-        )
+if winsorize:
+    st.warning(
+        "극단값 완화를 선택했다. 실제 급락과 급등의 크기도 줄어들 수 있으므로 "
+        "위험 분석에서는 원본 수익률 결과와 반드시 비교해야 한다."
     )
-
-st.subheader("③ 이상치 처리")
-
-outlier_method = st.radio(
-    "이상치 후보를 어떻게 처리할까요?",
-    options=[
-        "그대로 유지",
-        "IQR 경계값으로 조정",
-        "이상치 후보가 있는 행 삭제"
-    ],
-    index=0
-)
-
-st.warning(
-    "이상치 후보는 반드시 오류가 아닙니다. "
-    "금융 데이터에서는 실제 시장 변화를 반영할 수 있으므로 "
-    "기본 설정은 유지입니다."
-)
-
-
-# ----------------------------------------
-# 6. 선택한 전처리 실행
-# ----------------------------------------
-
-processed_df = before_df.copy()
-processing_log = []
-
-# 결측치 처리
-
-if missing_method == "결측치가 있는 행 삭제":
-
-    old_len = len(processed_df)
-
-    processed_df = processed_df.dropna().copy()
-
-    removed = old_len - len(processed_df)
-
-    processing_log.append(
-        f"결측치가 포함된 행 {removed:,}개 삭제"
-    )
-
-elif missing_method == "숫자형은 중앙값, 문자형은 최빈값으로 대체":
-
-    for col in processed_df.columns:
-
-        missing_count = int(processed_df[col].isna().sum())
-
-        if missing_count == 0:
-            continue
-
-        if pd.api.types.is_numeric_dtype(processed_df[col]):
-
-            fill_value = processed_df[col].median()
-            method_name = "중앙값"
-
-        else:
-
-            modes = processed_df[col].mode(dropna=True)
-
-            if modes.empty:
-                continue
-
-            fill_value = modes.iloc[0]
-            method_name = "최빈값"
-
-        if pd.notna(fill_value):
-
-            processed_df[col] = processed_df[col].fillna(
-                fill_value
-            )
-
-            processing_log.append(
-                f"{col}: 결측치 {missing_count:,}개를 "
-                f"{method_name}으로 대체"
-            )
-
-
-# 완전히 동일한 행 제거
-
-if remove_duplicates:
-
-    old_len = len(processed_df)
-
-    processed_df = processed_df.drop_duplicates().copy()
-
-    removed = old_len - len(processed_df)
-
-    processing_log.append(
-        f"완전히 동일한 중복 행 {removed:,}개 제거"
+else:
+    st.success(
+        "극단값을 그대로 유지한다. 실제 시장 위험을 보존하는 기본 설정이다."
     )
 
 
-# 같은 지수와 날짜의 중복 기록 제거
+# ==========================================
+# 4. 전처리 실행
+# ==========================================
 
-if remove_same_date_duplicates:
+st.divider()
+st.header("4. 전처리 실행")
 
-    old_len = len(processed_df)
-
-    processed_df = processed_df.drop_duplicates(
-        subset=["Index", "Date"],
-        keep="first"
-    ).copy()
-
-    removed = old_len - len(processed_df)
-
-    processing_log.append(
-        f"지수와 날짜 기준 중복 기록 {removed:,}개 제거"
+try:
+    clean_df, price_col, audit = prepare_market_data(
+        raw_df,
+        winsorize=winsorize
     )
 
-
-# 이상치 처리
-
-if (
-    selected_outlier_col is not None
-    and selected_outlier_col in processed_df.columns
-    and outlier_method != "그대로 유지"
-):
-
-    values = processed_df[selected_outlier_col].dropna()
-
-    if len(values) >= 4:
-
-        q1 = values.quantile(0.25)
-        q3 = values.quantile(0.75)
-        iqr = q3 - q1
-
-        lower = q1 - 1.5 * iqr
-        upper = q3 + 1.5 * iqr
-
-        if outlier_method == "IQR 경계값으로 조정":
-
-            processed_df[selected_outlier_col] = (
-                processed_df[selected_outlier_col]
-                .clip(lower=lower, upper=upper)
-            )
-
-            processing_log.append(
-                f"{selected_outlier_col}: "
-                "이상치 후보를 IQR 경계값으로 조정"
-            )
-
-        elif outlier_method == "이상치 후보가 있는 행 삭제":
-
-            mask = (
-                (processed_df[selected_outlier_col] < lower)
-                | (processed_df[selected_outlier_col] > upper)
-            ).fillna(False)
-
-            old_len = len(processed_df)
-
-            processed_df = processed_df.loc[~mask].copy()
-
-            removed = old_len - len(processed_df)
-
-            processing_log.append(
-                f"{selected_outlier_col}: "
-                f"이상치 후보 행 {removed:,}개 삭제"
-            )
-
-    else:
-
-        processing_log.append(
-            f"{selected_outlier_col}: 데이터가 부족해 "
-            "이상치 처리를 건너뜀"
-        )
+except Exception as e:
+    st.error("전처리 중 오류가 발생했습니다.")
+    st.exception(e)
+    st.stop()
 
 
-# 날짜 및 지수 기준 정렬
-
-sort_cols = [
-    col for col in ["Index", "Date"]
-    if col in processed_df.columns
-]
-
-if sort_cols:
-
-    processed_df = processed_df.sort_values(
-        by=sort_cols,
-        na_position="last"
-    ).reset_index(drop=True)
-
-    processing_log.append(
-        f"{', '.join(sort_cols)} 기준으로 데이터 정렬"
-    )
-
-
-# ----------------------------------------
-# 7. 전처리 전후 비교
-# ----------------------------------------
-
-st.header("5. 전처리 전후 결과 비교")
-
-before_rows = len(before_df)
-after_rows = len(processed_df)
-
-before_missing = int(before_df.isna().sum().sum())
-after_missing = int(processed_df.isna().sum().sum())
-
-before_duplicates = int(before_df.duplicated().sum())
-after_duplicates = int(processed_df.duplicated().sum())
-
-c1, c2, c3, c4 = st.columns(4)
+c1, c2, c3 = st.columns(3)
 
 c1.metric(
-    "행 개수",
-    f"{after_rows:,}",
-    delta=f"{after_rows - before_rows:+,}"
+    "전처리 전 행",
+    f"{audit['original_rows']:,}"
 )
 
 c2.metric(
-    "결측 셀 개수",
-    f"{after_missing:,}",
-    delta=f"{after_missing - before_missing:+,}",
-    delta_color="inverse"
+    "전처리 후 행",
+    f"{audit['final_rows']:,}"
 )
 
 c3.metric(
-    "완전 중복 행",
-    f"{after_duplicates:,}",
-    delta=f"{after_duplicates - before_duplicates:+,}",
-    delta_color="inverse"
+    "제거된 행",
+    f"{audit['original_rows'] - audit['final_rows']:,}"
 )
 
-c4.metric(
-    "열 개수",
-    f"{len(processed_df.columns):,}"
-)
-
-comparison = pd.DataFrame({
-    "항목": [
-        "행 개수",
-        "열 개수",
-        "결측 셀 개수",
-        "완전 중복 행 개수"
+audit_table = pd.DataFrame({
+    "단계": [
+        "원본 데이터",
+        "필수 정보와 유효한 가격 확인 후",
+        "중복 기록 제거 후"
     ],
-    "전처리 전": [
-        len(before_df),
-        len(before_df.columns),
-        before_missing,
-        before_duplicates
-    ],
-    "전처리 후": [
-        len(processed_df),
-        len(processed_df.columns),
-        after_missing,
-        after_duplicates
+    "행 개수": [
+        audit["original_rows"],
+        audit["after_valid_rows"],
+        audit["final_rows"]
     ]
 })
 
-st.subheader("전처리 전후 요약")
-
 st.dataframe(
-    comparison,
+    audit_table,
     use_container_width=True,
     hide_index=True
 )
 
-st.subheader("실제로 적용한 처리")
+st.write(f"사용한 종가 열: **{price_col}**")
+st.write(f"중복 제거 행: **{audit['duplicate_removed']:,}개**")
+st.write(f"유효하지 않은 행 제거: **{audit['invalid_removed']:,}개**")
 
-if processing_log:
 
-    for item in processing_log:
-        st.write(f"• {item}")
+# ==========================================
+# 5. 수익률 계산 결과
+# ==========================================
 
-else:
+st.divider()
+st.header("5. 수익률 변환 결과")
 
-    st.write(
-        "선택한 설정에 따라 추가로 적용된 처리 내용이 없습니다."
+st.markdown("""
+수익률은 현재 날짜의 종가를 전날 종가와 비교해 계산한다.
+
+예를 들어 전날 종가가 100이고 오늘 종가가 102라면 수익률은 약 2%이다.
+
+이렇게 변환하면 서로 다른 숫자 단위의 주가지수를 비교할 수 있다.
+""")
+
+return_data = clean_df.dropna(
+    subset=["daily_return"]
+).copy()
+
+if not return_data.empty:
+
+    st.metric(
+        "수익률 계산이 완료된 행",
+        f"{len(return_data):,}"
     )
-
-
-# ----------------------------------------
-# 8. 주요 통계량 비교
-# ----------------------------------------
-
-st.subheader("숫자형 변수 통계 비교")
-
-available_numeric = [
-    col for col in numeric_cols
-    if col in processed_df.columns
-]
-
-if available_numeric:
-
-    default_idx = (
-        available_numeric.index("Close")
-        if "Close" in available_numeric
-        else 0
-    )
-
-    stat_col = st.selectbox(
-        "비교할 숫자형 열",
-        options=available_numeric,
-        index=default_idx
-    )
-
-    stats_table = pd.DataFrame({
-        "통계량": [
-            "유효한 값 개수",
-            "평균",
-            "중앙값",
-            "표준편차",
-            "최솟값",
-            "최댓값"
-        ],
-        "전처리 전": [
-            before_df[stat_col].count(),
-            before_df[stat_col].mean(),
-            before_df[stat_col].median(),
-            before_df[stat_col].std(),
-            before_df[stat_col].min(),
-            before_df[stat_col].max()
-        ],
-        "전처리 후": [
-            processed_df[stat_col].count(),
-            processed_df[stat_col].mean(),
-            processed_df[stat_col].median(),
-            processed_df[stat_col].std(),
-            processed_df[stat_col].min(),
-            processed_df[stat_col].max()
-        ]
-    })
 
     st.dataframe(
-        stats_table.round(4),
+        return_data[
+            [
+                "Index",
+                "Date",
+                price_col,
+                "daily_return",
+                "daily_return_used"
+            ]
+        ].head(30),
+        use_container_width=True
+    )
+
+    st.subheader("일별 수익률 분포")
+
+    st.caption(
+        "수익률 분포의 꼬리가 길다면 일부 날짜에 큰 변동이 있었을 수 있다."
+    )
+
+    import plotly.express as px
+
+    fig = px.histogram(
+        return_data,
+        x="daily_return",
+        nbins=80,
+        title="시장 전체의 일별 수익률 분포"
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
+
+    q01 = return_data["daily_return"].quantile(0.01)
+    q99 = return_data["daily_return"].quantile(0.99)
+
+    st.write(f"하위 1% 수익률: **{q01:.4%}**")
+    st.write(f"상위 1% 수익률: **{q99:.4%}**")
+
+
+# ==========================================
+# 6. 시장별 특징 데이터
+# ==========================================
+
+st.divider()
+st.header("6. 시장별 분석용 변수 생성")
+
+st.markdown("""
+각 시장의 특징을 숫자로 표현하기 위해 다음 변수를 계산한다.
+
+- 연환산 평균 수익률: 하루 평균 수익률을 연간 거래일 252일 기준으로 환산한 근사치
+- 연환산 변동성: 수익률의 표준편차를 연간 기준으로 환산
+- 하락 변동성: 하락한 날의 수익률 변동 정도
+- 최대 낙폭: 과거 최고점에서 가장 크게 하락한 비율
+- 상승일 비율: 수익률이 양수였던 거래일의 비율
+- 평균 절대 수익률: 하루 변동의 평균적인 크기
+- 평균 일중 변동 폭: 고가와 저가의 차이를 전일 종가로 나눈 값
+""")
+
+min_obs = st.slider(
+    "시장별 최소 수익률 관측 일수",
+    min_value=30,
+    max_value=252,
+    value=60,
+    step=10
+)
+
+features = build_market_features(
+    clean_df,
+    price_col,
+    min_observations=min_obs
+)
+
+if features.empty:
+    st.warning(
+        "조건을 만족하는 시장이 없습니다. "
+        "최소 관측 일수를 낮추거나 원본 데이터의 기간을 확인해 주세요."
+    )
+else:
+    st.metric(
+        "분석 가능한 시장 수",
+        f"{len(features):,}"
+    )
+
+    st.dataframe(
+        features.round(4),
         use_container_width=True,
         hide_index=True
     )
 
-    plot_data = pd.concat([
-        pd.DataFrame({
-            "구분": "전처리 전",
-            "값": before_df[stat_col].dropna()
-        }),
-        pd.DataFrame({
-            "구분": "전처리 후",
-            "값": processed_df[stat_col].dropna()
-        })
-    ], ignore_index=True)
 
-    fig_compare = px.box(
-        plot_data,
-        x="구분",
-        y="값",
-        color="구분",
-        title=f"{stat_col} 전처리 전후 분포 비교"
-    )
+# ==========================================
+# 7. 다운로드
+# ==========================================
 
-    st.plotly_chart(
-        fig_compare,
-        use_container_width=True
-    )
-
-    st.caption(
-        "평균이나 분포가 달라졌다면 전처리 방법이 데이터에 "
-        "영향을 주었을 가능성이 있습니다. 변화가 크다고 해서 "
-        "무조건 잘못된 전처리라는 뜻은 아닙니다."
-    )
-
-else:
-
-    st.info("비교할 숫자형 열이 없습니다.")
-
-
-# ----------------------------------------
-# 9. 전처리 결과 미리 보기 및 다운로드
-# ----------------------------------------
-
-st.header("6. 전처리 결과 확인 및 저장")
-
-st.write(
-    f"전처리된 데이터: **{len(processed_df):,}행 × "
-    f"{len(processed_df.columns):,}열**"
-)
-
-st.dataframe(
-    processed_df.head(50),
-    use_container_width=True
-)
-
-csv_data = processed_df.to_csv(
-    index=False
-).encode("utf-8-sig")
+st.divider()
+st.header("7. 전처리 데이터 다운로드")
 
 st.download_button(
-    label="📥 전처리된 CSV 다운로드",
-    data=csv_data,
-    file_name="preprocessed_indexData.csv",
+    label="📥 전처리된 금융 데이터 CSV 다운로드",
+    data=clean_df.to_csv(
+        index=False
+    ).encode("utf-8-sig"),
+    file_name="global_market_preprocessed.csv",
     mime="text/csv"
 )
 
+if not features.empty:
+    st.download_button(
+        label="📥 시장별 특징 데이터 CSV 다운로드",
+        data=features.to_csv(
+            index=False
+        ).encode("utf-8-sig"),
+        file_name="global_market_features.csv",
+        mime="text/csv"
+    )
+
 st.caption(
-    "다운로드 파일은 현재 선택한 전처리 방법을 적용한 결과입니다. "
-    "원본 GitHub CSV는 변경되지 않습니다."
+    "모델 학습 페이지에서도 동일한 전처리 함수를 사용한다."
 )
