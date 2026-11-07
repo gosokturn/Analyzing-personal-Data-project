@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from pathlib import Path
 
 st.set_page_config(
     page_title="금융 지수 데이터 분석",
@@ -7,33 +8,45 @@ st.set_page_config(
     layout="wide"
 )
 
-
 # ==============================
 # 왼쪽 사이드바 메뉴
 # ==============================
+
+BASE_DIR = Path(__file__).resolve().parent
+PAGES_DIR = BASE_DIR / "pages"
 
 with st.sidebar:
     st.title("📈 금융 지수 데이터 분석")
     st.caption("데이터 분석 및 전처리")
 
     st.divider()
-
     st.subheader("📂 메뉴")
 
-    st.page_link(
-        "pages/1_탐색.py",
-        label="데이터 탐색",
-        icon="🔍"
-    )
+    # 페이지 파일 존재 여부 확인
+    explore_page = PAGES_DIR / "1_탐색.py"
+    preprocess_page = PAGES_DIR / "2_데이터_전처리.py"
 
-    st.page_link(
-        "pages/2_데이터_전처리.py",
-        label="데이터 전처리",
-        icon="🧹"
-    )
+    if not explore_page.is_file():
+        st.error(f"페이지 파일을 찾을 수 없습니다: {explore_page.name}")
+
+    else:
+        st.page_link(
+            explore_page,
+            label="데이터 탐색",
+            icon="🔍"
+        )
+
+    if not preprocess_page.is_file():
+        st.error(f"페이지 파일을 찾을 수 없습니다: {preprocess_page.name}")
+
+    else:
+        st.page_link(
+            preprocess_page,
+            label="데이터 전처리",
+            icon="🧹"
+        )
 
     st.divider()
-
     st.caption("금융 지수 데이터 분석 프로젝트")
 
 
