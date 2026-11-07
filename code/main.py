@@ -7,6 +7,41 @@ st.set_page_config(
     layout="wide"
 )
 
+# ==============================
+# 왼쪽 사이드바 메뉴
+# ==============================
+
+with st.sidebar:
+    st.title("📈 금융 지수 데이터 분석")
+    st.caption("데이터 분석 및 전처리")
+
+    st.divider()
+
+    st.subheader("📂 메뉴")
+
+    st.page_link(
+        "main.py",
+        label="홈",
+        icon="🏠"
+    )
+
+    st.page_link(
+        "pages/1_탐색.py",
+        label="데이터 탐색",
+        icon="🔍"
+    )
+
+    st.page_link(
+        "pages/2_데이터_전처리.py",
+        label="데이터 전처리",
+        icon="🧹"
+    )
+
+    st.divider()
+
+    st.caption("금융 지수 데이터 분석 프로젝트")
+
+
 DATA_URL = (
     "https://raw.githubusercontent.com/"
     "gosokturn/Analyzing-personal-Data-project/"
