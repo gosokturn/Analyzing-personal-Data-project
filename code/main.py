@@ -124,7 +124,7 @@ def home_page():
     st.divider()
     st.subheader("기존 분석 기능 바로가기")
     st.write("왼쪽 메뉴에서 데이터 탐색, 데이터 전처리, 기존 시장 분석 기능을 계속 사용할 수 있습니다.")
-    st.info("새로 추가한 '모델 설계·평가' 메뉴에는 질문, 데이터 분석, 기준선, 모델 평가의 4개 탭이 있습니다.")
+    st.info("왼쪽의 '급락 위험 예측' 메뉴에서 세 가지 예측 방법을 비교할 수 있습니다.")
     st.warning("이 앱은 과거 금융 데이터 분석을 위한 학습 도구이며 미래 수익이나 손실 방지를 보장하지 않습니다.")
 
 
@@ -143,294 +143,466 @@ def make_classification_data(data, threshold):
 
 
 def model_evaluation_page():
-    st.title("🧪 모델 설계·평가")
-    st.caption("기존 금융시장 분석 기능과 별도로, 모델을 왜 선택했고 기준선보다 나은지 검증합니다.")
+    st.title("📉 주식시장 급락 위험 예측")
+    st.caption(
+        "과거 시장 흐름을 바탕으로 다음 거래일의 큰 하락 가능성을 분류하고, "
+        "서로 다른 예측 방법 3가지를 비교합니다."
+    )
+
     if raw_df is None:
-        st.error("데이터를 준비하지 못해 모델 평가를 실행할 수 없습니다.")
+        st.error("데이터를 준비하지 못해 급락 위험을 분석할 수 없습니다.")
+        st.exception(data_error)
         st.stop()
 
+    threshold_pct = st.slider(
+        "어느 정도 하락을 '큰 하락'으로 볼까요?",
+        min_value=-10.0,
+        max_value=-1.0,
+        value=-2.0,
+        step=0.5,
+        help="예를 들어 -2%를 선택하면 다음 거래일 수익률이 -2% 이하인 경우를 큰 하락으로 분류합니다."
+    )
+    class_df, class_features = make_classification_data(
+        clean_df, threshold_pct / 100
+    )
+
     tab_question, tab_data, tab_baseline, tab_eval = st.tabs([
-        "① 질문", "② 데이터 분석", "③ 기준선", "④ 모델 평가"
+        "① 무엇을 예측할까?",
+        "② 어떤 데이터를 볼까?",
+        "③ 무엇과 비교할까?",
+        "④ 예측 결과"
     ])
 
     with tab_question:
-        st.header("① 어떤 질문에 답하려는가?")
+        st.header("무엇을 해결하려는 분석인가요?")
         st.markdown("""
         <div class="info-card">
-        <b>핵심 질문</b><br>
-        세계 금융시장의 과거 움직임을 바탕으로 시장 유형을 구분하고,
-        특정 시장에서 다음 거래일에 큰 하락이 나타날 가능성을 과거 데이터로 분류할 수 있을까?
+        <b>분석 질문</b><br>
+        최근 주식시장 움직임을 살펴보고, 다음 거래일에 큰 하락이 발생할 가능성이 있는지 미리 분류할 수 있을까요?
         </div>
         """, unsafe_allow_html=True)
 
-        st.subheader("문제에 따라 모델 종류를 구분")
-        q1, q2 = st.columns(2)
-        with q1:
-            st.markdown("#### 🧩 시장 유형 찾기")
-            st.write("시장별 수익률·변동성·최대 낙폭 등의 특징이 비슷한 시장끼리 묶는 문제이다.")
-            st.metric("적합한 학습 방식", "군집화")
-            st.write("정답 그룹이 미리 주어지지 않으므로 비지도학습을 사용한다.")
-        with q2:
-            st.markdown("#### 📉 다음 거래일 하락 사례 분류")
-            st.write("최근 수익률 흐름을 이용해 다음 거래일이 설정한 하락 기준에 해당하는지 분류한다.")
-            st.metric("적합한 학습 방식", "분류")
-            st.write("하락/비하락이라는 두 범주를 예측하므로 지도학습을 사용한다.")
+        st.subheader("왜 분류 모델을 사용하나요?")
+        st.write(
+            "이번 분석의 결과는 다음 거래일 수익률의 정확한 숫자가 아니라 "
+            "'큰 하락' 또는 '큰 하락이 아님' 두 가지 범주입니다. "
+            "따라서 연속된 숫자를 예측하는 회귀보다 분류 방식이 적합합니다."
+        )
 
-        st.info("회귀는 연속적인 수치(예: 다음 날 수익률 자체)를 예측할 때 적합하다. 현재 앱의 하락 위험 질문은 하락/비하락 범주를 구분하므로 분류가 적합하다.")
-        st.subheader("이번 모델 평가의 범위")
-        st.write("모델 평가 탭에서는 하락 위험 분류를 중심으로 기준선과 후보 모델 3종을 같은 시간 분할·변수 조건에서 비교한다. 군집화는 별도로 여러 군집 알고리즘의 군집 품질 지표를 비교한다.")
-        st.warning("이 프로젝트는 금융 데이터 분석 학습용이다. 과거 자료에서 얻은 결과가 미래 수익을 보장하거나 손실을 예방하지 않는다.")
+        left, right = st.columns(2)
+        with left:
+            st.markdown("#### 🔴 큰 하락")
+            st.write(
+                f"다음 거래일 수익률이 **{threshold_pct:.1f}% 이하**인 경우입니다."
+            )
+        with right:
+            st.markdown("#### 🟢 그 외의 움직임")
+            st.write(
+                f"다음 거래일 수익률이 **{threshold_pct:.1f}%보다 높은** 경우입니다."
+            )
+
+        st.subheader("비교할 예측 방법 3가지")
+        model_cols = st.columns(3)
+        with model_cols[0]:
+            st.markdown("#### 1. 로지스틱 회귀")
+            st.write(
+                "최근 수익률과 변동성의 조합을 바탕으로 하락 여부를 구분합니다. "
+                "결과를 비교적 이해하기 쉽다는 장점이 있습니다."
+            )
+        with model_cols[1]:
+            st.markdown("#### 2. 랜덤 포레스트")
+            st.write(
+                "여러 개의 결정 트리가 각자 판단한 결과를 모읍니다. "
+                "변수 사이의 복잡한 관계를 찾는 데 활용할 수 있습니다."
+            )
+        with model_cols[2]:
+            st.markdown("#### 3. 부스팅 모델")
+            st.write(
+                "앞선 예측에서 놓친 부분을 다음 단계에서 보완하며 여러 작은 예측기를 결합합니다. "
+                "복잡한 패턴을 학습할 수 있습니다."
+            )
+
+        st.info(
+            "세 모델은 같은 데이터와 같은 입력 변수를 사용합니다. "
+            "기준선은 후보 모델 3개와 별도로 두어, 학습한 모델이 단순한 예측보다 나은지 확인합니다."
+        )
+        st.warning(
+            "이 분석은 과거 자료를 이용한 학습용 실험입니다. "
+            "급락을 확실하게 예측하거나 투자 손실을 막아 주는 도구는 아닙니다."
+        )
 
     with tab_data:
-        st.header("② 데이터 분석")
-        st.write("모델에 넣기 전 데이터의 규모, 기간, 변수와 예측 대상의 분포를 확인한다.")
-        dates = pd.to_datetime(clean_df["Date"], errors="coerce").dropna()
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("원본 데이터 행", f"{len(raw_df):,}")
-        c2.metric("전처리 후 행", f"{len(clean_df):,}")
-        c3.metric("분석 시장 수", f"{clean_df['Index'].nunique():,}")
-        c4.metric("결측 셀 수", f"{int(clean_df.isna().sum().sum()):,}")
-        if not dates.empty:
-            st.write(f"**분석 기간:** {dates.min().date()} ~ {dates.max().date()}")
-        st.write(f"**가격 변수:** `{price_col}`")
-        st.write("**군집화 입력 변수:** 연환산 평균 수익률, 연환산 변동성, 하락 변동성, 최대 낙폭, 상승일 비율 등 계산 가능한 시장별 특징값")
-        st.write("**분류 입력 변수:** 당일 수익률, 최근 5거래일 누적 수익률, 최근 20거래일 변동성, 최근 20거래일 평균 수익률")
-        with st.expander("시장별 특징 데이터 미리 보기"):
-            st.dataframe(market_features, use_container_width=True, hide_index=True)
-        with st.expander("전처리 데이터 미리 보기"):
-            st.dataframe(clean_df.head(30), use_container_width=True, hide_index=True)
+        st.header("분석에 사용하는 데이터")
+        st.write(
+            "원본 주가 자료를 정리한 뒤, 시장별로 날짜 순서에 따라 "
+            "최근 움직임을 계산해 예측에 사용합니다."
+        )
 
-        threshold_pct = st.slider("큰 하락 기준: 다음 거래일 수익률(%)", -10.0, -1.0, -2.0, 0.5, key="data_threshold")
-        class_df, class_features = make_classification_data(clean_df, threshold_pct / 100)
+        dates = pd.to_datetime(clean_df["Date"], errors="coerce").dropna()
+        c1, c2, c3 = st.columns(3)
+        c1.metric("정리된 데이터", f"{len(clean_df):,}행")
+        c2.metric("분석 시장", f"{clean_df['Index'].nunique():,}개")
+        c3.metric("급락 기준", f"{threshold_pct:.1f}%")
+
+        if not dates.empty:
+            st.write(
+                f"**자료 기간:** {dates.min().date()}부터 {dates.max().date()}까지"
+            )
+
+        st.subheader("예측에 사용하는 정보")
+        feature_explanations = pd.DataFrame({
+            "사용 정보": [
+                "당일 수익률",
+                "최근 5거래일 누적 수익률",
+                "최근 20거래일 변동성",
+                "최근 20거래일 평균 수익률"
+            ],
+            "쉽게 말하면": [
+                "오늘 시장이 얼마나 오르거나 내렸는지",
+                "최근 일주일 정도의 흐름이 상승인지 하락인지",
+                "최근 한 달 정도 시장 움직임이 얼마나 크게 흔들렸는지",
+                "최근 한 달 정도 수익률의 평균적인 방향"
+            ]
+        })
+        st.dataframe(
+            feature_explanations,
+            use_container_width=True,
+            hide_index=True
+        )
+
         if not class_df.empty:
-            counts = class_df["target"].value_counts().reindex([0, 1], fill_value=0)
+            counts = class_df["target"].value_counts().reindex(
+                [0, 1], fill_value=0
+            )
             total = int(counts.sum())
-            c1, c2, c3 = st.columns(3)
-            c1.metric("분류 실험 행 수", f"{total:,}")
-            c2.metric("비하락 사례", f"{int(counts[0]):,} ({counts[0]/total:.1%})" if total else "0")
-            c3.metric("하락 사례", f"{int(counts[1]):,} ({counts[1]/total:.1%})" if total else "0")
-            st.caption("하락 사례 비율이 매우 낮으면 단순히 비하락만 예측해도 정확도가 높아질 수 있다. 따라서 정확도만 보지 않고 정밀도·재현율·F1도 함께 비교한다.")
+            a, b, c = st.columns(3)
+            a.metric("예측에 사용 가능한 기록", f"{total:,}건")
+            b.metric(
+                "큰 하락이 아닌 기록",
+                f"{int(counts[0]):,}건 ({counts[0] / total:.1%})"
+            )
+            c.metric(
+                "큰 하락 기록",
+                f"{int(counts[1]):,}건 ({counts[1] / total:.1%})"
+            )
+
+            st.caption(
+                "큰 하락 사례가 드물 수 있습니다. 이런 데이터에서는 모든 날을 "
+                "'큰 하락이 아님'이라고 예측해도 정확도가 높아질 수 있으므로 "
+                "실제 하락을 얼마나 찾아냈는지도 함께 살펴봅니다."
+            )
+            with st.expander("예측 데이터 일부 보기"):
+                preview = class_df[
+                    ["Index", "Date"] + class_features + ["next_return", "target"]
+                ].head(30).copy()
+                preview = preview.rename(columns={
+                    "Index": "시장",
+                    "Date": "날짜",
+                    "return_today": "당일 수익률",
+                    "return_5d": "최근 5일 수익률",
+                    "volatility_20d": "최근 20일 변동성",
+                    "mean_return_20d": "최근 20일 평균 수익률",
+                    "next_return": "다음 거래일 수익률",
+                    "target": "큰 하락 여부(1=예)"
+                })
+                st.dataframe(preview, use_container_width=True, hide_index=True)
         else:
-            st.warning("분류 모델을 만들기에 유효한 데이터가 부족하다.")
+            st.warning(
+                "현재 기준으로 계산할 수 있는 예측 데이터가 부족합니다. "
+                "자료 기간이나 급락 기준을 바꾸어 확인해 주세요."
+            )
 
     with tab_baseline:
-        st.header("③ 기준선(Baseline)")
-        st.write("기준선은 복잡한 모델의 성능이 실제로 나아졌는지 판단하기 위한 출발점이다.")
-        st.subheader("하락 위험 분류의 기준선")
+        st.header("비교의 출발점: 단순 예측")
+        st.write(
+            "새로운 모델이 정말 도움이 되는지 알아보려면, "
+            "먼저 복잡한 계산을 하지 않는 단순한 예측과 비교해야 합니다."
+        )
+        st.subheader("기준선: 가장 자주 나타난 결과만 예측")
         st.markdown("""
-        **다수 범주 예측(DummyClassifier, most_frequent)**
+        예를 들어 과거 기록 대부분이 '큰 하락이 아님'이라면,
+        기준선은 모든 테스트 날짜를 '큰 하락이 아님'이라고 예측합니다.
 
-        학습 데이터에서 더 많이 나타난 범주 하나만 계속 예측한다.
-        예를 들어 비하락이 대부분이면 모든 테스트 사례를 비하락이라고 예측한다.
-        입력 변수의 패턴을 학습하지 않는 단순한 기준 모델이다.
+        최근 시장 흐름이나 변동성은 전혀 살펴보지 않습니다.
+        따라서 이 단순한 기준선보다 세 후보 모델이 더 나은 결과를 내는지 확인할 수 있습니다.
         """)
-        st.subheader("군집화의 기준선")
-        st.markdown("""
-        **K-Means (기본 비교 모델)**
 
-        선택한 시장 특징값을 표준화한 뒤 K=3으로 나눈 결과를 기준으로 삼는다.
-        다른 군집 알고리즘도 동일한 시장·특징 변수·그룹 수를 사용해 실루엣 점수 등을 비교한다.
-        """)
-        st.info("기준선은 '성능이 좋아야 하는 모델'이 아니라, 후보 모델이 넘어야 할 최소 비교선이다. 기준선보다 나아지지 않았다면 복잡한 모델을 선택할 근거가 약하다.")
-        st.subheader("공정한 비교를 위한 고정 조건")
+        st.subheader("공정한 비교를 위해")
         st.markdown("""
-        - 동일한 원본 데이터와 전처리 결과 사용
-        - 분류 모델은 동일한 입력 변수 4개 사용
-        - 날짜 순서를 유지한 동일한 학습/테스트 분할 사용
-        - 분류 기준(다음 거래일 수익률 임계값)과 평가 지표 동일
-        - 난수 시드와 주요 모델 설정 고정
+        - 세 후보 모델과 기준선에 같은 학습 자료와 시험 자료를 사용합니다.
+        - 미래 정보를 미리 보지 않도록 과거 날짜를 학습에, 이후 날짜를 시험에 사용합니다.
+        - 네 가지 입력 정보와 큰 하락 기준을 동일하게 유지합니다.
+        - 정확도뿐 아니라 정밀도, 재현율, F1 점수도 함께 확인합니다.
         """)
+
+        st.info(
+            "**기준선은 네 번째 후보 모델이 아닙니다.** "
+            "세 모델의 성능이 단순 예측보다 나은지 확인하기 위한 비교용 출발점입니다."
+        )
 
     with tab_eval:
-        st.header("④ 모델 평가")
-        st.write("분류 모델은 기준선과 후보 3종을 비교하고, 군집화 모델은 동일한 입력값으로 군집 품질을 비교한다.")
-        threshold_pct = st.slider("큰 하락 기준: 다음 거래일 수익률(%)", -10.0, -1.0, -2.0, 0.5, key="eval_threshold")
-        class_df, class_features = make_classification_data(clean_df, threshold_pct / 100)
+        st.header("세 가지 모델의 실제 예측 결과")
+        st.write(
+            "과거 날짜 약 80%를 학습에 사용하고, 그 이후 날짜 약 20%를 "
+            "시험 자료로 남겨 성능을 비교합니다."
+        )
 
-        st.subheader("A. 하락 위험 분류 모델 비교")
         if len(class_df) < 100 or class_df["target"].nunique() < 2:
-            st.warning("분류 비교를 하려면 유효한 데이터 100건 이상과 하락/비하락 두 범주가 필요하다.")
+            st.warning(
+                "비교를 진행하려면 유효한 기록이 100건 이상이고, "
+                "큰 하락과 그 외의 사례가 모두 있어야 합니다."
+            )
         else:
             unique_dates = np.array(sorted(class_df["Date"].unique()))
             split_pos = int(len(unique_dates) * 0.8)
+
             if split_pos <= 0 or split_pos >= len(unique_dates):
-                st.warning("날짜 기준 학습/테스트 분할이 불가능하다.")
+                st.warning("날짜 순서에 따른 학습·시험 자료 분할이 어렵습니다.")
             else:
                 split_date = unique_dates[split_pos]
-                train = class_df[class_df["Date"] < split_date]
-                test = class_df[class_df["Date"] >= split_date]
-                X_train, y_train = train[class_features], train["target"]
-                X_test, y_test = test[class_features], test["target"]
+                train = class_df[class_df["Date"] < split_date].copy()
+                test = class_df[class_df["Date"] >= split_date].copy()
 
-                if len(test) == 0 or y_train.nunique() < 2:
-                    st.warning("학습 데이터에 두 범주가 모두 있거나 테스트 데이터가 있어야 한다.")
+                X_train = train[class_features]
+                y_train = train["target"]
+                X_test = test[class_features]
+                y_test = test["target"]
+
+                if (
+                    test.empty
+                    or y_train.nunique() < 2
+                    or y_test.nunique() < 2
+                ):
+                    st.warning(
+                        "학습 또는 시험 자료에 큰 하락과 그 외의 사례가 모두 포함되어야 "
+                        "안정적인 비교가 가능합니다. 급락 기준을 조정해 보세요."
+                    )
                 else:
+                    # 기준선 1개 + 실제 비교 대상 모델 3개
                     models = {
-                        "기준선: 다수 범주 예측": DummyClassifier(strategy="most_frequent"),
+                        "기준선: 가장 많은 범주": DummyClassifier(
+                            strategy="most_frequent"
+                        ),
                         "로지스틱 회귀": Pipeline([
                             ("imputer", SimpleImputer(strategy="median")),
                             ("scaler", StandardScaler()),
-                            ("model", LogisticRegression(class_weight="balanced", max_iter=1000, random_state=42))
+                            ("model", LogisticRegression(
+                                class_weight="balanced",
+                                max_iter=1000,
+                                random_state=42
+                            ))
                         ]),
                         "랜덤 포레스트": Pipeline([
                             ("imputer", SimpleImputer(strategy="median")),
-                            ("model", RandomForestClassifier(n_estimators=300, class_weight="balanced",
-                                                             random_state=42, n_jobs=-1, min_samples_leaf=2))
+                            ("model", RandomForestClassifier(
+                                n_estimators=300,
+                                class_weight="balanced",
+                                random_state=42,
+                                n_jobs=-1,
+                                min_samples_leaf=2
+                            ))
                         ]),
                         "히스토그램 기반 부스팅": Pipeline([
                             ("imputer", SimpleImputer(strategy="median")),
-                            ("model", HistGradientBoostingClassifier(max_iter=150, learning_rate=0.08,
-                                                                     random_state=42))
+                            ("model", HistGradientBoostingClassifier(
+                                max_iter=150,
+                                learning_rate=0.08,
+                                random_state=42
+                            ))
                         ])
                     }
-                    rows, prediction_store = [], {}
+
+                    rows = []
+                    prediction_store = {}
+
                     for name, model in models.items():
                         try:
                             model.fit(X_train, y_train)
                             pred = model.predict(X_test)
+
                             proba = None
                             if hasattr(model, "predict_proba"):
                                 proba = model.predict_proba(X_test)[:, 1]
-                            auc = roc_auc_score(y_test, proba) if proba is not None and y_test.nunique() == 2 else np.nan
+
+                            auc = (
+                                roc_auc_score(y_test, proba)
+                                if proba is not None
+                                else np.nan
+                            )
+
                             rows.append({
                                 "모델": name,
                                 "정확도": accuracy_score(y_test, pred),
-                                "정밀도": precision_score(y_test, pred, zero_division=0),
-                                "재현율": recall_score(y_test, pred, zero_division=0),
-                                "F1": f1_score(y_test, pred, zero_division=0),
+                                "정밀도": precision_score(
+                                    y_test, pred, zero_division=0
+                                ),
+                                "재현율": recall_score(
+                                    y_test, pred, zero_division=0
+                                ),
+                                "F1 점수": f1_score(
+                                    y_test, pred, zero_division=0
+                                ),
                                 "ROC-AUC": auc
                             })
                             prediction_store[name] = (model, pred)
+
                         except Exception as err:
-                            st.warning(f"{name} 학습 중 오류가 발생했다: {err}")
+                            st.warning(
+                                f"{name} 계산 중 문제가 발생했습니다: {err}"
+                            )
 
                     if rows:
                         result = pd.DataFrame(rows)
-                        baseline_name = "기준선: 다수 범주 예측"
-                        base_row = result[result["모델"] == baseline_name]
-                        candidate_rows = result[result["모델"] != baseline_name]
-                        if not candidate_rows.empty:
-                            best_name = candidate_rows.sort_values(["F1", "재현율"], ascending=False).iloc[0]["모델"]
-                            best_row = result[result["모델"] == best_name].iloc[0]
-                        else:
-                            best_name, best_row = None, None
+                        baseline_name = "기준선: 가장 많은 범주"
+                        baseline_rows = result[
+                            result["모델"] == baseline_name
+                        ]
+                        candidate_rows = result[
+                            result["모델"] != baseline_name
+                        ]
 
+                        st.subheader("성능 비교표")
                         st.dataframe(
-                            result.style.format({c: "{:.3f}" for c in ["정확도", "정밀도", "재현율", "F1", "ROC-AUC"]}),
-                            use_container_width=True, hide_index=True
+                            result.style.format({
+                                "정확도": "{:.3f}",
+                                "정밀도": "{:.3f}",
+                                "재현율": "{:.3f}",
+                                "F1 점수": "{:.3f}",
+                                "ROC-AUC": "{:.3f}"
+                            }),
+                            use_container_width=True,
+                            hide_index=True
                         )
-                        st.caption("모든 분류 모델은 동일한 날짜 기준 학습/테스트 구간과 동일한 입력 변수를 사용했다. 지표는 테스트 데이터에서 계산했다.")
-                        if best_name and not base_row.empty:
-                            base = base_row.iloc[0]
-                            st.subheader("결과 해석")
-                            st.write(f"F1을 우선하고 재현율을 보조 기준으로 비교했을 때 후보 중 **{best_name}**의 점수가 가장 높았다.")
-                            delta_f1 = float(best_row["F1"] - base["F1"])
-                            delta_recall = float(best_row["재현율"] - base["재현율"])
-                            st.write(f"- 기준선 대비 F1 변화: **{delta_f1:+.3f}**")
-                            st.write(f"- 기준선 대비 재현율 변화: **{delta_recall:+.3f}**")
+
+                        st.caption(
+                            "각 점수는 0~1 범위입니다. 일반적으로 높을수록 좋지만, "
+                            "급락 예측에서는 실제 하락을 찾아내는 재현율과 "
+                            "정밀도·F1을 함께 살펴봐야 합니다."
+                        )
+
+                        if not candidate_rows.empty and not baseline_rows.empty:
+                            best_row = candidate_rows.sort_values(
+                                ["F1 점수", "재현율"],
+                                ascending=[False, False]
+                            ).iloc[0]
+                            base_row = baseline_rows.iloc[0]
+
+                            delta_f1 = float(
+                                best_row["F1 점수"] - base_row["F1 점수"]
+                            )
+                            delta_recall = float(
+                                best_row["재현율"] - base_row["재현율"]
+                            )
+
+                            st.subheader("가장 높은 평가를 받은 모델")
+                            st.markdown(
+                                f"### {best_row['모델']}"
+                            )
+                            m1, m2, m3 = st.columns(3)
+                            m1.metric(
+                                "F1 점수",
+                                f"{best_row['F1 점수']:.3f}",
+                                f"{delta_f1:+.3f} (기준선 대비)"
+                            )
+                            m2.metric(
+                                "재현율",
+                                f"{best_row['재현율']:.3f}",
+                                f"{delta_recall:+.3f} (기준선 대비)"
+                            )
+                            m3.metric(
+                                "정밀도",
+                                f"{best_row['정밀도']:.3f}"
+                            )
+
                             if delta_f1 > 0 and delta_recall > 0:
-                                st.success("선정 후보는 기준선보다 F1과 재현율이 모두 높다. 다만 다른 기간에서도 유지되는지 추가 검증이 필요하다.")
+                                st.success(
+                                    "이 모델은 기준선보다 F1과 재현율이 모두 높습니다. "
+                                    "이번 시험 자료에서는 단순 예측보다 나은 결과입니다."
+                                )
                             elif delta_f1 > 0:
-                                st.info("F1은 기준선보다 높지만 재현율 개선은 확인되지 않았다. 하락 사례를 놓치는 정도도 함께 고려해야 한다.")
+                                st.info(
+                                    "F1 점수는 기준선보다 높지만 재현율은 개선되지 않았습니다. "
+                                    "실제 급락 사례를 놓치는 정도를 추가로 살펴봐야 합니다."
+                                )
                             else:
-                                st.warning("선정 후보가 F1 기준으로 기준선을 넘지 못했다. 현재 결과만으로 복잡한 모델을 선택할 근거가 충분하지 않다.")
+                                st.warning(
+                                    "가장 높은 후보 모델도 F1 점수에서 기준선을 넘지 못했습니다. "
+                                    "현재 결과만으로 후보 모델이 더 낫다고 판단하기 어렵습니다."
+                                )
 
-                            st.markdown("**선정 후보의 해석**")
-                            st.write(f"정확도 {best_row['정확도']:.3f}, 정밀도 {best_row['정밀도']:.3f}, 재현율 {best_row['재현율']:.3f}, F1 {best_row['F1']:.3f}이다.")
-                            st.write("재현율은 실제 하락 사례 중 찾아낸 비율이며, 정밀도는 하락이라고 예측한 사례 중 실제 하락인 비율이다. 하락 사례가 적은 데이터에서는 정확도만으로 모델을 판단하지 않는다.")
+                            st.subheader("선택 모델이 맞히고 놓친 사례")
+                            chosen_name = best_row["모델"]
+                            chosen_model, chosen_pred = prediction_store[chosen_name]
+                            cm = confusion_matrix(
+                                y_test, chosen_pred, labels=[0, 1]
+                            )
+                            cm_df = pd.DataFrame(
+                                cm,
+                                index=["실제 큰 하락 아님", "실제 큰 하락"],
+                                columns=["큰 하락 아님 예측", "큰 하락 예측"]
+                            )
+                            fig_cm = px.imshow(
+                                cm_df,
+                                text_auto=True,
+                                aspect="auto",
+                                color_continuous_scale="Blues",
+                                title="실제 결과와 모델 예측 비교",
+                                labels={
+                                    "x": "모델의 예측",
+                                    "y": "실제 결과",
+                                    "color": "기록 수"
+                                }
+                            )
+                            st.plotly_chart(
+                                fig_cm, use_container_width=True
+                            )
 
-                            chosen_model, chosen_pred = prediction_store[best_name]
-                            cm = confusion_matrix(y_test, chosen_pred, labels=[0, 1])
-                            cm_df = pd.DataFrame(cm, index=["실제 비하락", "실제 하락"], columns=["비하락 예측", "하락 예측"])
-                            fig_cm = px.imshow(cm_df, text_auto=True, aspect="auto", color_continuous_scale="Blues",
-                                               title=f"{best_name}: 혼동행렬",
-                                               labels={"x": "예측", "y": "실제", "color": "사례 수"})
-                            st.plotly_chart(fig_cm, use_container_width=True)
-                            st.write(f"학습 기간: {pd.Timestamp(train['Date'].min()).date()} ~ {pd.Timestamp(train['Date'].max()).date()} ({len(train):,}건)")
-                            st.write(f"테스트 기간: {pd.Timestamp(test['Date'].min()).date()} ~ {pd.Timestamp(test['Date'].max()).date()} ({len(test):,}건)")
-                            st.download_button("📥 분류 모델 비교 결과 CSV", result.to_csv(index=False).encode("utf-8-sig"),
-                                               "classification_model_comparison.csv", "text/csv")
+                            st.write(
+                                f"**학습 기간:** "
+                                f"{pd.Timestamp(train['Date'].min()).date()} ~ "
+                                f"{pd.Timestamp(train['Date'].max()).date()}"
+                            )
+                            st.write(
+                                f"**시험 기간:** "
+                                f"{pd.Timestamp(test['Date'].min()).date()} ~ "
+                                f"{pd.Timestamp(test['Date'].max()).date()}"
+                            )
+
+                            st.download_button(
+                                "📥 모델 비교 결과 내려받기",
+                                data=result.to_csv(
+                                    index=False
+                                ).encode("utf-8-sig"),
+                                file_name="crash_risk_model_comparison.csv",
+                                mime="text/csv"
+                            )
                         else:
-                            st.warning("기준선 또는 비교 후보 모델 결과가 충분하지 않다.")
+                            st.warning(
+                                "기준선과 세 후보 모델의 결과를 모두 계산하지 못했습니다."
+                            )
                     else:
-                        st.error("모델 비교 결과를 계산하지 못했다.")
+                        st.error(
+                            "모델 결과를 계산하지 못했습니다. 데이터와 라이브러리 버전을 확인해 주세요."
+                        )
 
         st.divider()
-        st.subheader("B. 시장 유형 군집화 모델 비교")
-        st.write("군집화는 정답 라벨이 없으므로 정확도 대신 실루엣 점수, Davies-Bouldin 지수, Calinski-Harabasz 지수를 참고한다.")
-        feat_cols = [c for c in [
-            "annualized_return", "annualized_volatility", "downside_volatility",
-            "max_drawdown", "positive_day_ratio", "average_absolute_return",
-            "average_intraday_range"
-        ] if c in market_features.columns and market_features[c].notna().any()]
-        if len(feat_cols) < 2 or len(market_features) < 4:
-            st.info("군집화 모델을 비교할 시장 특징값이 충분하지 않다.")
-        else:
-            chosen_feats = st.multiselect("군집화 비교에 사용할 동일한 특징 변수", feat_cols, default=feat_cols,
-                                          key="cluster_features")
-            k = st.slider("군집 수 K", 2, min(6, len(market_features)-1),
-                          min(3, min(6, len(market_features)-1)), key="cluster_k")
-            if len(chosen_feats) < 2:
-                st.warning("군집화 비교에는 특징 변수를 2개 이상 선택해야 한다.")
-            else:
-                cluster_data = market_features[["Index"] + chosen_feats].dropna(subset=chosen_feats, how="all").copy()
-                if len(cluster_data) <= k:
-                    st.warning("선택한 조건에서 군집 수보다 시장 수가 많아야 한다.")
-                else:
-                    imputer = SimpleImputer(strategy="median")
-                    X = imputer.fit_transform(cluster_data[chosen_feats])
-                    X_scaled = RobustScaler().fit_transform(X)
-                    cluster_models = {
-                        "기준선: K-Means": KMeans(n_clusters=k, random_state=42, n_init=20),
-                        "계층적 군집화": AgglomerativeClustering(n_clusters=k),
-                        "가우시안 혼합 모델": GaussianMixture(n_components=k, random_state=42, n_init=5)
-                    }
-                    cluster_rows = []
-                    for name, model in cluster_models.items():
-                        try:
-                            if name == "가우시안 혼합 모델":
-                                labels = model.fit_predict(X_scaled)
-                            else:
-                                labels = model.fit_predict(X_scaled)
-                            if len(np.unique(labels)) < 2 or len(np.unique(labels)) >= len(labels):
-                                continue
-                            cluster_rows.append({
-                                "모델": name,
-                                "실루엣 점수(높을수록 좋음)": silhouette_score(X_scaled, labels),
-                                "Davies-Bouldin(낮을수록 좋음)": davies_bouldin_score(X_scaled, labels),
-                                "Calinski-Harabasz(높을수록 좋음)": calinski_harabasz_score(X_scaled, labels)
-                            })
-                        except Exception as err:
-                            st.warning(f"{name} 계산 중 오류: {err}")
-                    if cluster_rows:
-                        cluster_result = pd.DataFrame(cluster_rows)
-                        st.dataframe(cluster_result.round(3), use_container_width=True, hide_index=True)
-                        best_cluster = cluster_result.sort_values(
-                            ["실루엣 점수(높을수록 좋음)", "Davies-Bouldin(낮을수록 좋음)"],
-                            ascending=[False, True]
-                        ).iloc[0]
-                        st.write(f"실루엣 점수를 우선하고 Davies-Bouldin 지수를 보조 기준으로 보면 **{best_cluster['모델']}**이 이번 설정에서 가장 높은 평가를 받았다.")
-                        st.caption("군집 품질 지표는 선택한 변수와 K에 따라 달라진다. 점수가 높다고 경제적 의미가 자동으로 보장되거나 미래 주가를 예측하는 것은 아니다.")
-                        st.download_button("📥 군집화 모델 비교 결과 CSV", cluster_result.to_csv(index=False).encode("utf-8-sig"),
-                                           "clustering_model_comparison.csv", "text/csv")
-                    else:
-                        st.warning("유효한 군집 결과를 계산하지 못했다. K 또는 변수 구성을 바꾸어 확인해 보자.")
-
-        st.divider()
-        st.subheader("평가 결과를 보고서에 옮길 때")
-        st.write("표에 표시된 실제 수치와 기준선 대비 차이를 사용해 작성한다. 계산되지 않은 값이나 확인하지 않은 모델 성능을 임의로 기재하지 않는다.")
+        st.subheader("점수를 해석하는 방법")
         st.markdown("""
-        - **질문:** 다음 거래일의 큰 하락 여부를 과거 금융시장 데이터로 분류할 수 있는가?
-        - **기준선:** 학습 데이터에서 가장 많은 범주를 테스트 데이터 전체에 예측하는 다수 범주 기준선이다.
-        - **비교:** 로지스틱 회귀, 랜덤 포레스트, 히스토그램 기반 부스팅을 동일한 날짜 분할과 입력 변수로 비교한다.
-        - **선정:** F1을 우선하고 재현율을 보조 기준으로 살펴보되, 기준선보다 개선되지 않으면 우수한 모델이라고 결론 내리지 않는다.
+        - **정확도:** 전체 예측 중 맞힌 비율
+        - **정밀도:** 큰 하락이라고 예측한 날 중 실제로 큰 하락이었던 비율
+        - **재현율:** 실제 큰 하락 중 모델이 찾아낸 비율
+        - **F1 점수:** 정밀도와 재현율을 함께 고려한 점수
+        - **ROC-AUC:** 큰 하락과 그 외의 사례를 구별하는 능력
+
+        특히 큰 하락 사례가 드물면 정확도만으로 모델을 평가하면 안 됩니다.
+        점수가 기준선보다 높더라도 다른 시기의 데이터에서도 비슷한 결과가 나오는지 추가로 확인해야 합니다.
         """)
 
-
-
     st.divider()
-    st.caption("모델 점수는 실제 데이터로 실행해 확인해야 하며, 과거 결과가 미래 수익을 보장하지 않습니다.")
-
+    st.caption(
+        "이 결과는 과거 데이터에 대한 학습용 비교입니다. "
+        "실제 시장의 급락을 확정적으로 예측하거나 투자 손실을 방지하지 않습니다."
+    )
 
 if not PAGES_DIR.exists():
     st.error("pages 폴더를 찾을 수 없습니다.")
@@ -439,7 +611,7 @@ if not PAGES_DIR.exists():
 page_specs = [
     ("1_탐색.py", "데이터 탐색", "🔍"),
     ("2_데이터_전처리.py", "데이터 전처리", "🧹"),
-    ("3_모델_학습_결과.py", "기존 시장 분석", "🧠")
+    ("3_모델_학습_결과.py", "시장 유형·관계 분석", "🧠")
 ]
 for filename, _, _ in page_specs:
     if not (PAGES_DIR / filename).is_file():
@@ -449,14 +621,14 @@ for filename, _, _ in page_specs:
 home = st.Page(home_page, title="홈", icon="🏠", default=True)
 explore = st.Page(str(PAGES_DIR / "1_탐색.py"), title="데이터 탐색", icon="🔍")
 preprocess = st.Page(str(PAGES_DIR / "2_데이터_전처리.py"), title="데이터 전처리", icon="🧹")
-existing_analysis = st.Page(str(PAGES_DIR / "3_모델_학습_결과.py"), title="기존 시장 분석", icon="📊")
-evaluation = st.Page(model_evaluation_page, title="모델 설계·평가", icon="🧪")
+existing_analysis = st.Page(str(PAGES_DIR / "3_모델_학습_결과.py"), title="시장 유형·관계 분석", icon="📊")
+evaluation = st.Page(model_evaluation_page, title="급락 위험 예측", icon="📉")
 
 pg = st.navigation(
     {
         "서비스": [home, explore, preprocess],
         "분석": [existing_analysis],
-        "모델 검증": [evaluation]
+        "위험 분석": [evaluation]
     },
     position="sidebar"
 )
