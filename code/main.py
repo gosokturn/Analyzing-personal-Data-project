@@ -25,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. 교육용 데이터 분석 앱 디자인 테마 (밝은 회색/아이보리 배경, 흰색 카드, 남색·파란색 포인트)
+# 2. 교육용 데이터 분석 앱 디자인 테마
 st.markdown("""
 <style>
 .stApp {
@@ -89,7 +89,6 @@ PAGES_DIR = BASE_DIR / "pages"
 @st.cache_data(show_spinner="세계 금융시장 데이터를 불러오고 정리하는 중...")
 def get_data():
     raw = load_raw_data()
-    # 이상치 완화는 기본 비활성화(winsorize=False)하여 실제 급락 사건 보존
     clean, price_col, audit = prepare_market_data(raw, winsorize=False)
     features = build_market_features(clean, price_col, min_observations=60)
     return raw, clean, price_col, audit, features
@@ -125,7 +124,6 @@ def home_page():
     end_date = dates.max().date() if not dates.empty else None
     avg_vol = market_features["annualized_volatility"].mean() if not market_features.empty else np.nan
 
-    # 실측 가능한 지표만 카드로 표시
     a, b, c, d = st.columns(4)
     a.metric("분석 대상 시장 수", f"{market_count:,}개")
     b.metric("전처리 후 데이터 행", f"{len(clean_df):,}행")
@@ -185,7 +183,7 @@ def home_page():
     st.subheader("메뉴 안내")
     st.write("- **데이터 탐색 / 데이터 전처리**: 원본 주가지수 데이터의 기간, 결측치, 중복 제거 및 수익률 변환 과정을 확인합니다.")
     st.write("- **시장 유형·관계 분석**: K-Means 군집화와 시장 간 수익률 상관관계 히트맵을 탐색합니다.")
-    st.info("왼쪽 사이드바의 **'급락 위험 예측'** 메뉴에서 세 가지 분류 모델 중 원하는 모델을 선택하여 기준선과 성능을 비교할 수 있습니다.")
+    st.info("왼쪽 사이드바의 **'급락 위험 예측'** 메뉴에서 원하는 모델들을 선택해 기준선과 함께 비교할 수 있습니다.")
     st.warning("본 서비스는 과거 금융시장 데이터를 이해하기 위한 교육·연구용 분석 도구이며, 실제 투자 수익이나 손실 방지를 보장하지 않습니다.")
 
 
@@ -196,13 +194,11 @@ def make_classification_data(data: pd.DataFrame, threshold: float):
     df = df.sort_values(["Index", "Date"]).reset_index(drop=True)
     grouped = df.groupby("Index")["daily_return_used"]
 
-    # 예측 시점(t)에 확인 가능한 과거 정보만 특징 변수로 생성
     df["return_today"] = df["daily_return_used"]
     df["return_5d"] = grouped.transform(lambda s: s.rolling(5, min_periods=5).sum())
     df["volatility_20d"] = grouped.transform(lambda s: s.rolling(20, min_periods=20).std())
     df["mean_return_20d"] = grouped.transform(lambda s: s.rolling(20, min_periods=20).mean())
 
-    # 다음 거래일(t+1) 수익률은 오직 정답 라벨 생성에만 사용 (입력 변수 제외)
     df["next_return"] = grouped.shift(-1)
     df["target"] = (df["next_return"] <= threshold).astype(int)
 
@@ -211,7 +207,7 @@ def make_classification_data(data: pd.DataFrame, threshold: float):
     return valid_df, features
 
 
-# 6. 선택 모델 생성 헬퍼 함수
+# 6. 개별 모델 생성 헬퍼 함수
 def build_selected_model(model_name: str):
     if model_name == "로지스틱 회귀":
         return Pipeline([
@@ -252,7 +248,7 @@ def model_evaluation_page():
     st.title("📉 주식시장 급락 위험 예측")
     st.caption(
         "과거 시장의 수익률과 변동성 정보를 바탕으로 다음 거래일의 큰 하락 위험을 분류하고, "
-        "원하는 예측 모델을 하나씩 선택해 단순 기준선과 비교합니다."
+        "원하는 모델들을 조합하여 선택한 뒤 단순 기준선과 비교합니다."
     )
 
     if raw_df is None:
@@ -260,7 +256,6 @@ def model_evaluation_page():
         st.exception(data_error)
         st.stop()
 
-    # 급락 기준 설정 (모든 모델 비교에 동일하게 적용)
     threshold_pct = st.slider(
         "어느 정도 하락을 '큰 하락(급락)'으로 정의할까요?",
         min_value=-10.0,
@@ -278,7 +273,6 @@ def model_evaluation_page():
         "④ 예측 결과"
     ])
 
-    # [탭 1] 무엇을 예측할까?
     with tab_question:
         st.header("무엇을 해결하려는 분석인가요?")
         st.markdown("""
@@ -303,33 +297,23 @@ def model_evaluation_page():
             st.markdown("#### <span class='badge-normal'>🟢 큰 하락이 아님 (일반 움직임: 0)</span>", unsafe_allow_html=True)
             st.write(f"다음 거래일 수익률이 **{threshold_pct:.1f}%보다 높은** 경우입니다.")
 
-        st.subheader("선택하여 실험할 분류 모델 3가지")
+        st.subheader("비교할 수 있는 분류 모델 3가지")
         model_cols = st.columns(3)
         with model_cols[0]:
             st.markdown("#### 1. 로지스틱 회귀")
-            st.write(
-                "수익률과 변동성의 선형 조합을 통해 급락 확률을 계산합니다. "
-                "계산 구조가 명확하여 결과를 해석하기 쉽습니다."
-            )
+            st.write("선형 조합을 통해 급락 확률을 계산하며, 결과를 이해하기 쉽습니다.")
         with model_cols[1]:
             st.markdown("#### 2. 랜덤 포레스트")
-            st.write(
-                "여러 개의 결정 트리가 각각 판단한 결과를 모아 투표합니다. "
-                "변수 사이의 비선형적이고 복잡한 조건을 학습할 수 있습니다."
-            )
+            st.write("여러 개의 결정 트리가 투표하여 복잡한 비선형 관계를 학습합니다.")
         with model_cols[2]:
             st.markdown("#### 3. 히스토그램 기반 부스팅")
-            st.write(
-                "여러 단계의 작은 예측기를 순차적으로 연결하여 이전 단계가 틀린 오차를 보완합니다. "
-                "대규모 표 형태 데이터에서 패턴을 정교하게 학습합니다."
-            )
+            st.write("순차적으로 오차를 보완하며 대규모 데이터 패턴을 정교하게 학습합니다.")
 
         st.info(
-            "실제 예측 결과 탭에서는 세 모델을 한꺼번에 무작정 돌리지 않고, "
-            "원하는 모델을 **직접 선택하고 실행 버튼**을 눌러 기준선과 비교할 수 있습니다."
+            "아래 '예측 결과' 탭에서 **원하는 모델들을 항목별로 자유롭게 선택(1개, 일부, 혹은 전부)**하여 "
+            "기준선과 함께 실행하고 비교할 수 있습니다."
         )
 
-    # [탭 2] 어떤 데이터를 볼까?
     with tab_data:
         st.header("예측 모델에 들어가는 데이터")
         st.write(
@@ -370,7 +354,7 @@ def model_evaluation_page():
             a, b, c = st.columns(3)
             a.metric("모델 학습·시험 가능 기록", f"{total:,}건")
             b.metric("큰 하락이 아닌 기록 (0)", f"{int(counts[0]):,}건 ({counts[0] / total:.1%})")
-            c.metric("큰 하락 기록 (1)", f"{int(counts[1]):,}건 ({counts[1] / total:.1%})")
+            c.metric("큰 하락 기록 (1)", f"{int(counts[1]):,}건 ({counts[1] / total:1%})")
 
             st.caption(
                 "※ 금융시장 데이터는 '큰 하락'보다 '큰 하락이 아님'이 훨씬 많은 불균형 데이터입니다. "
@@ -392,7 +376,6 @@ def model_evaluation_page():
         else:
             st.warning("현재 기준으로 계산할 수 있는 예측 데이터가 부족합니다. 급락 기준을 조정해 주세요.")
 
-    # [탭 3] 무엇과 비교할까?
     with tab_baseline:
         st.header("비교의 기준점: 단순 기준선 (Baseline)")
         st.write(
@@ -404,7 +387,7 @@ def model_evaluation_page():
         st.markdown("""
         - 학습 데이터에서 가장 많이 등장한 범주(대부분의 경우 **'큰 하락이 아님'**)만 모든 시험 날짜에 동일하게 예측합니다.
         - 최근 수익률이나 변동성 정보를 전혀 사용하지 않습니다.
-        - **기준선은 후보 모델 3개 중 하나가 아니며**, 사용자가 어떤 모델을 선택하든 동일한 시험 데이터에서 나란히 비교됩니다.
+        - **기준선은 후보 모델들과 별도로 항상 함께 비교되며**, 사용자가 어떤 모델을 선택하든 동일한 시험 데이터에서 나란히 평가됩니다.
         """)
 
         st.subheader("데이터 누수 방지 및 공정한 평가 원칙")
@@ -415,12 +398,11 @@ def model_evaluation_page():
         4. **미래 정보 차단:** 다음 거래일 수익률은 정답 라벨(`target`)을 만들 때만 쓰며 입력 변수에는 절대 포함하지 않습니다.
         """)
 
-    # [탭 4] 예측 결과 (사용자 모델 선택 및 실행 버튼 방식)
     with tab_eval:
-        st.header("모델 선택 및 기준선 비교 결과")
+        st.header("모델 다중 선택 및 기준선 비교 결과")
         st.write(
-            "아래에서 비교할 분류 모델 **하나를 선택**한 뒤 실행 버튼을 누르면, "
-            "해당 모델만 학습하여 단순 기준선과 성능을 비교합니다."
+            "아래에서 비교하고 싶은 모델들을 **자유롭게 여러 개 선택**한 뒤 실행 버튼을 누르면, "
+            "선택한 모델들만 각각 학습하여 단순 기준선과 함께 성능을 비교합니다."
         )
 
         if len(class_df) < 100 or class_df["target"].nunique() < 2:
@@ -453,7 +435,6 @@ def model_evaluation_page():
             )
             return
 
-        # 분할 기간 요약 안내
         train_start = pd.Timestamp(train["Date"].min()).date()
         train_end = pd.Timestamp(train["Date"].max()).date()
         test_start = pd.Timestamp(test["Date"].min()).date()
@@ -464,44 +445,44 @@ def model_evaluation_page():
             f"시험 기간 `{test_start} ~ {test_end}` ({len(test):,}건)"
         )
 
-        # 모델 선택 UI와 실행 버튼 분리
+        # 다중 선택 UI (st.multiselect) 적용
+        all_candidate_models = ["로지스틱 회귀", "랜덤 포레스트", "히스토그램 기반 부스팅"]
+        
         sel_col, btn_col = st.columns([3, 1])
         with sel_col:
-            selected_model_name = st.selectbox(
-                "학습 및 평가할 분류 모델을 선택하세요",
-                options=["로지스틱 회귀", "랜덤 포레스트", "히스토그램 기반 부스팅"],
-                index=0,
-                help="세 모델을 한꺼번에 학습하지 않고, 선택한 모델 하나만 학습하여 기준선과 비교합니다."
+            selected_models_list = st.multiselect(
+                "비교할 모델을 선택하세요 (하나, 일부, 또는 모두 선택 가능)",
+                options=all_candidate_models,
+                default=all_candidate_models, # 기본값은 전체 선택
+                help="원하는 모델을 추가하거나 제거하여 동시에 비교할 수 있습니다."
             )
         with btn_col:
             st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-            run_clicked = st.button("🚀 선택한 모델 실행", type="primary", use_container_width=True)
+            run_clicked = st.button("🚀 선택한 모델들 실행", type="primary", use_container_width=True)
 
-        # 실행 상태를 세션에 저장하여 모델/기준 변경 시 명확히 구분
-        current_run_key = (selected_model_name, threshold_pct)
+        if not selected_models_list:
+            st.warning("비교할 모델을 최소한 하나 이상 선택해 주세요.")
+            return
+
+        current_run_key = (tuple(sorted(selected_models_list)), threshold_pct)
         if run_clicked:
             st.session_state["last_eval_key"] = current_run_key
             st.session_state["should_run_eval"] = True
 
         if st.session_state.get("last_eval_key") != current_run_key:
             st.info(
-                f"현재 선택된 모델은 **{selected_model_name}** (급락 기준 **{threshold_pct:.1f}%**)입니다. "
-                "오른쪽의 **'선택한 모델 실행'** 버튼을 누르면 학습과 평가가 시작됩니다."
+                f"현재 선택된 모델 목록: **{', '.join(selected_models_list)}** (급락 기준 **{threshold_pct:.1f}%**)입니다. "
+                "오른쪽의 **'선택한 모델들 실행'** 버튼을 누르면 학습과 평가가 시작됩니다."
             )
             return
 
-        # 선택된 모델 1개 + 기준선 학습 및 평가
+        # 기준선 + 선택된 복수의 모델 학습 및 평가
         try:
-            with st.spinner(f"'{selected_model_name}' 모델과 기준선을 학습·평가하는 중..."):
+            with st.spinner("선택된 모델들과 기준선을 학습·평가하는 중..."):
                 baseline_model = DummyClassifier(strategy="most_frequent")
                 baseline_model.fit(X_train, y_train)
                 base_pred = baseline_model.predict(X_test)
                 base_proba = baseline_model.predict_proba(X_test)[:, 1] if hasattr(baseline_model, "predict_proba") else None
-
-                chosen_model = build_selected_model(selected_model_name)
-                chosen_model.fit(X_train, y_train)
-                chosen_pred = chosen_model.predict(X_test)
-                chosen_proba = chosen_model.predict_proba(X_test)[:, 1] if hasattr(chosen_model, "predict_proba") else None
 
                 def calc_metrics(name, y_true, y_pred, y_prob):
                     auc_val = roc_auc_score(y_true, y_prob) if (y_prob is not None and len(np.unique(y_true)) == 2) else np.nan
@@ -514,29 +495,26 @@ def model_evaluation_page():
                         "ROC-AUC": auc_val
                     }
 
-                base_metrics = calc_metrics("기준선 (가장 많은 범주 예측)", y_test, base_pred, base_proba)
-                chosen_metrics = calc_metrics(selected_model_name, y_test, chosen_pred, chosen_proba)
-                result_df = pd.DataFrame([base_metrics, chosen_metrics])
+                rows = [calc_metrics("기준선 (가장 많은 범주 예측)", y_test, base_pred, base_proba)]
+                model_predictions = {}
+
+                for m_name in selected_models_list:
+                    model_pipe = build_selected_model(m_name)
+                    model_pipe.fit(X_train, y_train)
+                    m_pred = model_pipe.predict(X_test)
+                    m_proba = model_pipe.predict_proba(X_test)[:, 1] if hasattr(model_pipe, "predict_proba") else None
+
+                    rows.append(calc_metrics(m_name, y_test, m_pred, m_proba))
+                    model_predictions[m_name] = (model_pipe, m_pred)
+
+                result_df = pd.DataFrame(rows)
 
         except Exception as err:
             st.error(f"모델 학습 또는 평가 중 오류가 발생했습니다: {err}")
             st.exception(err)
             return
 
-        # 핵심 지표 카드 (기준선 대비 변화량 표시)
-        delta_f1 = chosen_metrics["F1 점수"] - base_metrics["F1 점수"]
-        delta_recall = chosen_metrics["재현율"] - base_metrics["재현율"]
-        delta_prec = chosen_metrics["정밀도"] - base_metrics["정밀도"]
-        delta_acc = chosen_metrics["정확도"] - base_metrics["정확도"]
-
-        st.subheader(f"📊 '{selected_model_name}' vs 기준선 성능 비교")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("F1 점수", f"{chosen_metrics['F1 점수']:.3f}", f"{delta_f1:+.3f} (기준선 대비)")
-        m2.metric("재현율 (실제 급락 포착)", f"{chosen_metrics['재현율']:.3f}", f"{delta_recall:+.3f} (기준선 대비)")
-        m3.metric("정밀도 (예측 정확성)", f"{chosen_metrics['정밀도']:.3f}", f"{delta_prec:+.3f} (기준선 대비)")
-        m4.metric("정확도", f"{chosen_metrics['정확도']:.3f}", f"{delta_acc:+.3f} (기준선 대비)")
-
-        # 상세 비교표 (ROC-AUC 미지원/결측 시 '미지원' 표기)
+        st.subheader("📊 선택한 모델들과 기준선 성능 비교표")
         display_df = result_df.copy()
         for col in ["정확도", "정밀도", "재현율", "F1 점수"]:
             display_df[col] = display_df[col].map(lambda v: f"{v:.3f}")
@@ -544,88 +522,79 @@ def model_evaluation_page():
 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        # 객관적 결과 해석 안내
-        if delta_f1 > 0 and delta_recall > 0:
-            st.success(
-                f"**해석:** '{selected_model_name}' 모델은 기준선보다 F1 점수({delta_f1:+.3f})와 "
-                f"재현율({delta_recall:+.3f})이 모두 높습니다. 현재 시험 기간에서는 단순 예측보다 급락 신호를 더 잘 포착했습니다."
-            )
-        elif delta_f1 > 0:
-            st.info(
-                f"**해석:** '{selected_model_name}' 모델은 F1 점수가 기준선보다 높지만, "
-                "실제 급락을 놓치지 않는 비율(재현율)의 개선 폭을 함께 검토해야 합니다."
-            )
-        else:
-            st.warning(
-                f"**해석:** '{selected_model_name}' 모델은 현재 급락 기준({threshold_pct:.1f}%)에서 "
-                "F1 점수가 기준선을 넘지 못했습니다. 과거 수익률과 변동성만으로는 급락 분류에 한계가 있음을 보여줍니다."
-            )
+        st.caption(
+            "각 지표는 0~1 사이의 값입니다. 급락 예측에서는 단순 정확도뿐만 아니라 "
+            "실제 하락을 찾아내는 재현율과 F1 점수를 함께 비교하는 것이 중요합니다."
+        )
 
-        # 혼동행렬 시각화
-        st.subheader(f"🧩 '{selected_model_name}' 혼동행렬 (맞히고 놓친 사례)")
-        cm = confusion_matrix(y_test, chosen_pred, labels=[0, 1])
-        tn, fp, fn, tp = cm.ravel()
+        # 후보 모델 중 F1 점수 기준 가장 우수한 모델 선정 및 상세 시각화
+        candidate_result = result_df[result_df["구분"] != "기준선 (가장 많은 범주 예측)"]
+        if not candidate_result.empty:
+            best_row = candidate_result.sort_values(["F1 점수", "재현율"], ascending=[False, False]).iloc[0]
+            best_name = best_row["구분"]
 
-        cm_col1, cm_col2 = st.columns([1.3, 1])
-        with cm_col1:
-            cm_df = pd.DataFrame(
-                cm,
-                index=["실제: 큰 하락 아님 (0)", "실제: 큰 하락 (1)"],
-                columns=["예측: 큰 하락 아님 (0)", "예측: 큰 하락 (1)"]
-            )
-            fig_cm = px.imshow(
-                cm_df,
-                text_auto=True,
-                aspect="auto",
-                color_continuous_scale="Blues",
-                title=f"{selected_model_name} 예측 결과 분포",
-                labels={"x": "모델의 예측", "y": "실제 결과", "color": "건수"}
-            )
-            st.plotly_chart(fig_cm, use_container_width=True)
+            st.subheader(f"🏆 선택된 모델 중 F1 기준 우수 모델: {best_name}")
+            
+            # 혼동행렬 시각화
+            if best_name in model_predictions:
+                _, best_pred = model_predictions[best_name]
+                cm = confusion_matrix(y_test, best_pred, labels=[0, 1])
+                tn, fp, fn, tp = cm.ravel()
 
-        with cm_col2:
-            st.markdown("#### 네 가지 예측 결과 상세")
-            st.write(f"- **실제 비급락 → 비급락 예측 (정상 통과):** `{tn:,}건`")
-            st.write(f"- **실제 비급락 → 급락 예측 (오경보):** `{fp:,}건`")
-            st.write(f"- **실제 급락 → 비급락 예측 (놓친 위험):** `{fn:,}건` ⚠️")
-            st.write(f"- **실제 급락 → 급락 예측 (위험 포착):** `{tp:,}건` ✅")
-            st.caption(
-                "급락 위험 분류에서는 실제 급락을 비급락으로 잘못 예측하여 '놓친 위험(FN)'을 줄이는 것이 중요합니다."
-            )
+                cm_col1, cm_col2 = st.columns([1.3, 1])
+                with cm_col1:
+                    cm_df = pd.DataFrame(
+                        cm,
+                        index=["실제: 큰 하락 아님 (0)", "실제: 큰 하락 (1)"],
+                        columns=["예측: 큰 하락 아님 (0)", "예측: 큰 하락 (1)"]
+                    )
+                    fig_cm = px.imshow(
+                        cm_df,
+                        text_auto=True,
+                        aspect="auto",
+                        color_continuous_scale="Blues",
+                        title=f"{best_name} 혼동행렬 (예측 결과 분포)",
+                        labels={"x": "모델의 예측", "y": "실제 결과", "color": "건수"}
+                    )
+                    st.plotly_chart(fig_cm, use_container_width=True)
 
-        # 학술포스터 및 연구 기록용 실측 데이터 보존 영역
+                with cm_col2:
+                    st.markdown("#### 혼동행렬 상세 건수")
+                    st.write(f"- **정상 통과 (TN):** `{tn:,}건`")
+                    st.write(f"- **오경보 (FP):** `{fp:,}건`")
+                    st.write(f"- **놓친 위험 (FN):** `{fn:,}건` ⚠️")
+                    st.write(f"- **위험 포착 (TP):** `{tp:,}건` ✅")
+                    st.caption("실제 급락을 비급락으로 잘못 예측하는 '놓친 위험(FN)'을 줄이는 것이 핵심입니다.")
+
+        # 연구 기록 요약
         with st.expander("📑 학술포스터·연구 기록용 실측 결과 요약 보기"):
-            st.caption("아래 수치는 현재 실행된 실제 데이터와 모델 평가 결과에서 자동으로 기록된 값입니다.")
-            auc_str = f"{chosen_metrics['ROC-AUC']:.3f}" if pd.notna(chosen_metrics["ROC-AUC"]) else "미지원"
+            st.caption("현재 화면에 나타난 비교 결과의 요약 정보입니다.")
             research_summary = f"""
 [연구 및 실험 실측 기록]
 - 연구 주제: 세계 금융시장 데이터 분석을 통한 주식시장 급락 위험 분류 모델 개발
-- 데이터 기간: {train_start} ~ {test_end} (전체 유효 기록: {len(class_df):,}건, 분석 시장 수: {clean_df['Index'].nunique()}개)
+- 데이터 기간: {train_start} ~ {test_end} (전체 유효 기록: {len(class_df):,}건, 시장 수: {clean_df['Index'].nunique()}개)
 - 학습 / 시험 분할: 학습 {train_start} ~ {train_end} ({len(train):,}건) / 시험 {test_start} ~ {test_end} ({len(test):,}건)
 - 급락 기준: 다음 거래일 수익률 {threshold_pct:.1f}% 이하
 - 입력 특징 변수: {', '.join(class_features)}
-- 선택 평가 모델: {selected_model_name}
-- 기준선(DummyClassifier) 성능: 정확도 {base_metrics['정확도']:.3f} | 정밀도 {base_metrics['정밀도']:.3f} | 재현율 {base_metrics['재현율']:.3f} | F1 {base_metrics['F1 점수']:.3f}
-- {selected_model_name} 성능: 정확도 {chosen_metrics['정확도']:.3f} | 정밀도 {chosen_metrics['정밀도']:.3f} | 재현율 {chosen_metrics['재현율']:.3f} | F1 {chosen_metrics['F1 점수']:.3f} | ROC-AUC {auc_str}
-- 혼동행렬(TN / FP / FN / TP): {tn} / {fp} / {fn} / {tp}
+- 비교 대상 모델 목록: {', '.join(selected_models_list)}
             """.strip()
             st.code(research_summary, language="text")
 
         st.download_button(
-            label=f"📥 '{selected_model_name}' 비교 결과 CSV 내려받기",
+            label="📥 다중 모델 비교 결과 CSV 내려받기",
             data=result_df.to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"crash_risk_{selected_model_name}_comparison.csv",
+            file_name="crash_risk_multi_model_comparison.csv",
             mime="text/csv"
         )
 
         st.divider()
         st.subheader("평가 지표 읽는 법")
         st.markdown("""
-        - **정확도 (Accuracy):** 전체 시험 사례 중 모델이 맞힌 비율입니다. 급락이 드문 데이터에서는 모든 날을 '비급락'으로 찍어도 높게 나올 수 있어 주의해야 합니다.
-        - **정밀도 (Precision):** 모델이 '큰 하락'이라고 경고한 날 중 실제로 큰 하락이 일어난 비율입니다.
-        - **재현율 (Recall):** 실제로 발생한 큰 하락 중에서 모델이 미리 찾아낸 비율입니다.
-        - **F1 점수 (F1-Score):** 정밀도와 재현율의 조화평균으로, 불균형 데이터에서 두 지표를 균형 있게 평가합니다.
-        - **ROC-AUC:** 모델이 급락 사례와 비급락 사례를 구별해 내는 전반적인 변별력(0.5=무작위 수준, 1.0=완벽 구별)입니다.
+        - **정확도 (Accuracy):** 전체 예측 중 맞힌 비율
+        - **정밀도 (Precision):** 급락이라고 예측한 날 중 실제로 급락이었던 비율
+        - **재현율 (Recall):** 실제 급락 중 모델이 찾아낸 비율
+        - **F1 점수 (F1-Score):** 정밀도와 재현율의 조화평균
+        - **ROC-AUC:** 급락과 비급락을 구별하는 전반적인 변별력 능력
         """)
 
     st.divider()
@@ -653,7 +622,7 @@ for filename, _, _ in page_specs:
 home = st.Page(home_page, title="홈", icon="🏠", default=True)
 explore = st.Page(str(PAGES_DIR / "1_탐색.py"), title="데이터 탐색", icon="🔍")
 preprocess = st.Page(str(PAGES_DIR / "2_데이터_전처리.py"), title="데이터 전처리", icon="🧹")
-existing_analysis = st.Page(str(PAGES_DIR / "3_모델_학습_결과.py"), title="시장 유형·관계 분석", icon="📊")
+existing_analysis = st.Page(str(PESSIONS_DIR := PAGES_DIR / "3_모델_학습_결과.py"), title="시장 유형·관계 분석", icon="📊") if 'PESSIONS_DIR' else st.Page(str(PAGES_DIR / "3_모델_학습_결과.py"), title="시장 유형·관계 분석", icon="📊")
 evaluation = st.Page(model_evaluation_page, title="급락 위험 예측", icon="📉")
 
 pg = st.navigation(
